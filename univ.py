@@ -24,8 +24,8 @@ st.set_page_config(
     layout="wide"
 )
 
-DB_PATH = "university_integrated_platform_v26.db"
 CURRENT_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(CURRENT_DIR, "university_integrated_platform_v26.db")
 
 
 def get_image_file(candidates):
@@ -499,9 +499,12 @@ def df_to_pdf_bytes(df: pd.DataFrame, faculty_name: str, cols: list, is_rtl: boo
 # ==========================================
 @st.cache_resource
 def get_conn():
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False, timeout=30)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
+    try:
+        conn.execute("PRAGMA journal_mode=WAL")
+    except Exception:
+        pass
     return conn
 
 
@@ -524,126 +527,140 @@ def now_str():
 
 
 def init_db():
-    conn.executescript(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            role TEXT NOT NULL,
-            faculty TEXT NOT NULL,
-            password_hash TEXT,
-            salt TEXT
-        );
-        CREATE TABLE IF NOT EXISTS academic_seasons (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            season_year TEXT NOT NULL UNIQUE,
-            is_active INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS season_stats (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            season_year TEXT NOT NULL UNIQUE,
-            total_projects INTEGER NOT NULL DEFAULT 0,
-            innovative_certificates INTEGER NOT NULL DEFAULT 0,
-            startup_certificates INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS faculty_sheets (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            faculty_code TEXT NOT NULL,
-            season_year TEXT NOT NULL,
-            row_num INTEGER NOT NULL,
-            full_name TEXT NOT NULL,
-            department TEXT NOT NULL,
-            level TEXT NOT NULL,
-            project_name TEXT NOT NULL,
-            project_summary TEXT NOT NULL,
-            updated_by TEXT,
-            updated_at TEXT
-        );
-        CREATE TABLE IF NOT EXISTS resources (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            category TEXT NOT NULL,
-            link TEXT NOT NULL,
-            uploaded_by INTEGER NOT NULL REFERENCES users(id)
-        );
-        CREATE TABLE IF NOT EXISTS notifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL REFERENCES users(id),
-            message TEXT NOT NULL,
-            created_at TEXT NOT NULL,
-            is_read INTEGER NOT NULL DEFAULT 0
-        );
-        CREATE TABLE IF NOT EXISTS defense_reports (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            title TEXT NOT NULL,
-            filename TEXT NOT NULL,
-            file_ext TEXT NOT NULL,
-            file_data BLOB NOT NULL,
-            faculty_code TEXT NOT NULL,
-            season_year TEXT NOT NULL,
-            uploaded_by INTEGER NOT NULL REFERENCES users(id),
-            created_at TEXT NOT NULL
-        );
-        """
-    )
-
-    cur_f = conn.execute("PRAGMA table_info(faculty_sheets)")
-    f_cols = [r["name"] for r in cur_f.fetchall()]
-    if "faculty_code" not in f_cols and "faculty" in f_cols:
-        conn.execute("ALTER TABLE faculty_sheets ADD COLUMN faculty_code TEXT")
-        conn.execute("UPDATE faculty_sheets SET faculty_code = faculty")
+    try:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS users (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL,
+                role TEXT NOT NULL,
+                faculty TEXT NOT NULL,
+                password_hash TEXT,
+                salt TEXT
+            );
+            CREATE TABLE IF NOT EXISTS academic_seasons (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                season_year TEXT NOT NULL UNIQUE,
+                is_active INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS season_stats (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                season_year TEXT NOT NULL UNIQUE,
+                total_projects INTEGER NOT NULL DEFAULT 0,
+                innovative_certificates INTEGER NOT NULL DEFAULT 0,
+                startup_certificates INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS faculty_sheets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                faculty_code TEXT,
+                faculty TEXT,
+                season_year TEXT NOT NULL,
+                row_num INTEGER NOT NULL,
+                full_name TEXT NOT NULL,
+                department TEXT NOT NULL,
+                level TEXT NOT NULL,
+                project_name TEXT NOT NULL,
+                project_summary TEXT NOT NULL,
+                updated_by TEXT,
+                updated_at TEXT
+            );
+            CREATE TABLE IF NOT EXISTS resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                category TEXT NOT NULL,
+                link TEXT NOT NULL,
+                uploaded_by INTEGER NOT NULL REFERENCES users(id)
+            );
+            CREATE TABLE IF NOT EXISTS notifications (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id INTEGER NOT NULL REFERENCES users(id),
+                message TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                is_read INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE TABLE IF NOT EXISTS defense_reports (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                title TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                file_ext TEXT NOT NULL,
+                file_data BLOB NOT NULL,
+                faculty_code TEXT,
+                faculty TEXT,
+                season_year TEXT NOT NULL,
+                uploaded_by INTEGER NOT NULL REFERENCES users(id),
+                created_at TEXT NOT NULL
+            );
+            """
+        )
         conn.commit()
+    except Exception:
+        pass
 
-    cur_d = conn.execute("PRAGMA table_info(defense_reports)")
-    d_cols = [r["name"] for r in cur_d.fetchall()]
-    if "faculty_code" not in d_cols:
-        if "target_faculty" in d_cols:
-            conn.execute("ALTER TABLE defense_reports ADD COLUMN faculty_code TEXT")
-            conn.execute("UPDATE defense_reports SET faculty_code = target_faculty")
-            conn.commit()
-        elif "faculty" in d_cols:
-            conn.execute("ALTER TABLE defense_reports ADD COLUMN faculty_code TEXT")
-            conn.execute("UPDATE defense_reports SET faculty_code = faculty")
+    try:
+        cur_f = conn.execute("PRAGMA table_info(faculty_sheets)")
+        f_cols = [r["name"] for r in cur_f.fetchall()]
+        if "faculty_code" not in f_cols and "faculty" in f_cols:
+            conn.execute("ALTER TABLE faculty_sheets ADD COLUMN faculty_code TEXT")
+            conn.execute("UPDATE faculty_sheets SET faculty_code = faculty")
             conn.commit()
 
-    conn.execute("""
-        UPDATE faculty_sheets SET faculty_code = 'FAC_TECH' 
-        WHERE faculty_code IN ('كلية العلوم والتكنولوجيا', 'Faculté des Sciences et de la Technologie')
-    """)
-    conn.execute("""
-        UPDATE faculty_sheets SET faculty_code = 'FAC_ECON' 
-        WHERE faculty_code IN ('كلية العلوم الاقتصادية', 'Faculté des Sciences Économiques')
-    """)
-    conn.execute("""
-        UPDATE faculty_sheets SET faculty_code = 'FAC_LIT' 
-        WHERE faculty_code IN ('كلية الآداب واللغات والعلوم الاجتماعية', 'Faculté des Lettres et Sciences Sociales')
-    """)
-    conn.execute("""
-        UPDATE faculty_sheets SET faculty_code = 'FAC_LAW' 
-        WHERE faculty_code IN ('كلية الحقوق', 'Faculté de Droit')
-    """)
+        cur_d = conn.execute("PRAGMA table_info(defense_reports)")
+        d_cols = [r["name"] for r in cur_d.fetchall()]
+        if "faculty_code" not in d_cols:
+            if "target_faculty" in d_cols:
+                conn.execute("ALTER TABLE defense_reports ADD COLUMN faculty_code TEXT")
+                conn.execute("UPDATE defense_reports SET faculty_code = target_faculty")
+                conn.commit()
+            elif "faculty" in d_cols:
+                conn.execute("ALTER TABLE defense_reports ADD COLUMN faculty_code TEXT")
+                conn.execute("UPDATE defense_reports SET faculty_code = faculty")
+                conn.commit()
+    except Exception:
+        pass
 
-    conn.execute("UPDATE academic_seasons SET season_year = REPLACE(season_year, '-', '/')")
-    conn.execute("UPDATE faculty_sheets SET season_year = REPLACE(season_year, '-', '/')")
-    conn.execute("UPDATE defense_reports SET season_year = REPLACE(season_year, '-', '/')")
-    conn.commit()
+    try:
+        conn.execute("""
+            UPDATE faculty_sheets SET faculty_code = 'FAC_TECH' 
+            WHERE faculty_code IN ('كلية العلوم والتكنولوجيا', 'Faculté des Sciences et de la Technologie')
+        """)
+        conn.execute("""
+            UPDATE faculty_sheets SET faculty_code = 'FAC_ECON' 
+            WHERE faculty_code IN ('كلية العلوم الاقتصادية', 'Faculté des Sciences Économiques')
+        """)
+        conn.execute("""
+            UPDATE faculty_sheets SET faculty_code = 'FAC_LIT' 
+            WHERE faculty_code IN ('كلية الآداب واللغات والعلوم الاجتماعية', 'Faculté des Lettres et Sciences Sociales')
+        """)
+        conn.execute("""
+            UPDATE faculty_sheets SET faculty_code = 'FAC_LAW' 
+            WHERE faculty_code IN ('كلية الحقوق', 'Faculté de Droit')
+        """)
+        conn.execute("UPDATE OR IGNORE academic_seasons SET season_year = REPLACE(season_year, '-', '/')")
+        conn.execute("UPDATE OR IGNORE faculty_sheets SET season_year = REPLACE(season_year, '-', '/')")
+        conn.execute("UPDATE OR IGNORE defense_reports SET season_year = REPLACE(season_year, '-', '/')")
+        conn.commit()
+    except Exception:
+        pass
 
-    inc_user = q("SELECT id FROM users WHERE role='INCUBATOR' LIMIT 1", one=True)
-    if not inc_user:
-        default_hash_inc, default_salt_inc = hash_password("123456789")
-        conn.execute(
-            "INSERT INTO users (name, role, faculty, password_hash, salt) VALUES (?, ?, ?, ?, ?)",
-            ("مدير حاضنة الأعمال", "INCUBATOR", "إدارة الحاضنة", default_hash_inc, default_salt_inc)
-        )
+    try:
+        inc_user = q("SELECT id FROM users WHERE role='INCUBATOR' LIMIT 1", one=True)
+        if not inc_user:
+            default_hash_inc, default_salt_inc = hash_password("123456789")
+            conn.execute(
+                "INSERT INTO users (name, role, faculty, password_hash, salt) VALUES (?, ?, ?, ?, ?)",
+                ("مدير حاضنة الأعمال", "INCUBATOR", "إدارة الحاضنة", default_hash_inc, default_salt_inc)
+            )
 
-    cde_user = q("SELECT id FROM users WHERE role='CDE' LIMIT 1", one=True)
-    if not cde_user:
-        default_hash_cde, default_salt_cde = hash_password("987654321")
-        conn.execute(
-            "INSERT INTO users (name, role, faculty, password_hash, salt) VALUES (?, ?, ?, ?, ?)",
-            ("مدير مركز تطوير المقاولاتية", "CDE", "مركز تطوير المقاولاتية", default_hash_cde, default_salt_cde)
-        )
-    conn.commit()
+        cde_user = q("SELECT id FROM users WHERE role='CDE' LIMIT 1", one=True)
+        if not cde_user:
+            default_hash_cde, default_salt_cde = hash_password("987654321")
+            conn.execute(
+                "INSERT INTO users (name, role, faculty, password_hash, salt) VALUES (?, ?, ?, ?, ?)",
+                ("مدير مركز تطوير المقاولاتية", "CDE", "مركز تطوير المقاولاتية", default_hash_cde, default_salt_cde)
+            )
+        conn.commit()
+    except Exception:
+        pass
 
     seasons_data = [
         ("2023/2024", 0),
@@ -652,9 +669,13 @@ def init_db():
         ("2026/2027", 1),
     ]
     for s_yr, is_act in seasons_data:
-        exists = q("SELECT id FROM academic_seasons WHERE season_year=?", (s_yr,), one=True)
-        if not exists:
-            conn.execute("INSERT INTO academic_seasons (season_year, is_active) VALUES (?, ?)", (s_yr, is_act))
+        try:
+            exists = q("SELECT id FROM academic_seasons WHERE season_year=?", (s_yr,), one=True)
+            if not exists:
+                conn.execute("INSERT OR IGNORE INTO academic_seasons (season_year, is_active) VALUES (?, ?)",
+                             (s_yr, is_act))
+        except Exception:
+            pass
     conn.commit()
 
     official_stats = [
@@ -664,18 +685,21 @@ def init_db():
         ("2026/2027", 0, 0, 0),
     ]
     for s_yr, tot_proj, innov, start in official_stats:
-        s_exist = q("SELECT id FROM season_stats WHERE season_year=?", (s_yr,), one=True)
-        if not s_exist:
-            conn.execute(
-                "INSERT INTO season_stats (season_year, total_projects, innovative_certificates, startup_certificates) VALUES (?, ?, ?, ?)",
-                (s_yr, tot_proj, innov, start)
-            )
-        else:
-            if s_yr in ["2023/2024", "2024/2025", "2025/2026"]:
+        try:
+            s_exist = q("SELECT id FROM season_stats WHERE season_year=?", (s_yr,), one=True)
+            if not s_exist:
                 conn.execute(
-                    "UPDATE season_stats SET total_projects=?, innovative_certificates=?, startup_certificates=? WHERE season_year=?",
-                    (tot_proj, innov, start, s_yr)
+                    "INSERT OR IGNORE INTO season_stats (season_year, total_projects, innovative_certificates, startup_certificates) VALUES (?, ?, ?, ?)",
+                    (s_yr, tot_proj, innov, start)
                 )
+            else:
+                if s_yr in ["2023/2024", "2024/2025", "2025/2026"]:
+                    conn.execute(
+                        "UPDATE season_stats SET total_projects=?, innovative_certificates=?, startup_certificates=? WHERE season_year=?",
+                        (tot_proj, innov, start, s_yr)
+                    )
+        except Exception:
+            pass
     conn.commit()
 
 
@@ -1551,23 +1575,29 @@ def render_faculty_hub(faculty_display_name: str, tab_idx: int, active_season: s
                             flash("تم إيداع محضر المناقشة بنجاح." if is_ar else "Procès-verbal déposé avec succès.")
                             st.rerun()
 
-    pvs = q(
-        """SELECT r.id, r.title, r.filename, r.file_ext, r.file_data, r.faculty_code,
-                  r.season_year, r.uploaded_by, r.created_at, u.name AS uploader
-           FROM defense_reports r
-           JOIN users u ON u.id = r.uploaded_by
-           WHERE (r.faculty_code = ? OR r.faculty = ?) AND r.season_year = ?
-           ORDER BY r.id DESC""" if "faculty" in [r["name"] for r in
-                                                  conn.execute("PRAGMA table_info(defense_reports)").fetchall()] else
-        """SELECT r.id, r.title, r.filename, r.file_ext, r.file_data, r.faculty_code,
-                  r.season_year, r.uploaded_by, r.created_at, u.name AS uploader
-           FROM defense_reports r
-           JOIN users u ON u.id = r.uploaded_by
-           WHERE r.faculty_code = ? AND r.season_year = ?
-           ORDER BY r.id DESC""",
-        (faculty_code, faculty_code, active_season) if "faculty" in [r["name"] for r in conn.execute(
-            "PRAGMA table_info(defense_reports)").fetchall()] else (faculty_code, active_season),
-    )
+    cur_pv_check = conn.execute("PRAGMA table_info(defense_reports)")
+    has_legacy_pv_faculty = "faculty" in [r["name"] for r in cur_pv_check.fetchall()]
+
+    if has_legacy_pv_faculty:
+        pvs = q(
+            """SELECT r.id, r.title, r.filename, r.file_ext, r.file_data, r.faculty_code,
+                      r.season_year, r.uploaded_by, r.created_at, u.name AS uploader
+               FROM defense_reports r
+               JOIN users u ON u.id = r.uploaded_by
+               WHERE (r.faculty_code = ? OR r.faculty = ?) AND r.season_year = ?
+               ORDER BY r.id DESC""",
+            (faculty_code, faculty_code, active_season),
+        )
+    else:
+        pvs = q(
+            """SELECT r.id, r.title, r.filename, r.file_ext, r.file_data, r.faculty_code,
+                      r.season_year, r.uploaded_by, r.created_at, u.name AS uploader
+               FROM defense_reports r
+               JOIN users u ON u.id = r.uploaded_by
+               WHERE r.faculty_code = ? AND r.season_year = ?
+               ORDER BY r.id DESC""",
+            (faculty_code, active_season),
+        )
 
     if not pvs:
         st.info(
