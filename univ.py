@@ -1938,4 +1938,4 @@ else:
                 Version bêta | Développé par : Pr Mohammed Boutouba
             </p>
         </div>
-    """, unsafe_allow_html=True)    """, unsafe_allow_html=True)
+    """, unsafe_allow_html=True)
